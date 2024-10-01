@@ -1,0 +1,814 @@
+---
+title: "stm_news"
+date: "09/30/2024" 
+output:
+  html_document: default
+--- 
+#Install the Structural Topic Model (STM) Package
+```{r}
+library(quanteda)
+library(stm)
+library(wordcloud)
+library(readr)
+library(tidyverse)
+```
+
+#Step 1: Set Up Your Working Directory
+```{r}
+getwd()  # Use this to check your current directory
+df <- read.csv("C:/Users/linqi/Documents/gunvio/Newsdesk_mate/filtered_text.csv")
+colnames(data)
+View(df)
+
+```
+
+#Step 2: Preparation for Text Analysis
+```{r}
+# Combine title and content
+df$text <- paste(df$processed_title, df$processed_content)
+
+# Prepare data for STM using the 'textProcessor' function
+processed <- textProcessor(df$text, metadata = df)
+
+# Prepare documents for STM
+out <- prepDocuments(processed$documents, processed$vocab, processed$meta)
+
+# Extract documents, vocab, and metadata for STM
+docs <- out$documents
+vocab <- out$vocab
+meta <- out$meta
+
+plotRemoved(processed$documents, lower.thresh = seq(1, 200, by = 1))
+```
+
+#Step 3: Search K
+```{r}
+# Estimate models with different values of K
+k_results <- searchK(documents = out$documents, 
+                     vocab = out$vocab, 
+                     K = c(5, 7, 10, 15),  # Test different numbers of topics
+                     prevalence = ~ media_category, 
+                     data = out$meta
+                     )
+
+# Visualize the results to choose the optimal K
+plot(k_results)
+
+```
+#SearchK Conclusion:
+Based on the Held-Out Likelihood, Residuals, and Lower Bound, you might be inclined to choose a higher K value because these metrics improve with more topics.
+However, Semantic Coherence suggests that K=7 provides more interpretable topics, and coherence decreases after that.
+Thus I will try k= 15, 7, 10
+
+#Step 4: Estimate Different Models for STM with K = 7, 10, and 15 Topics
+
+## Model 1: k=15 cov=media_category
+```{r}
+model_stm <- stm(documents = out$documents, 
+                 vocab = out$vocab,  
+                 K = 15, 
+                 prevalence =~ media_category, #how the topics are distributed across different media
+                 seed = 100, 
+                 max.em.its = 100, 
+                 data = out$meta, 
+                 init.type = "Spectral"
+                 )
+```
+
+## Model 1:Plot the topic summary for model_stm  
+```{r}
+plot(model_stm, type = "summary", xlim = c(0, 0.5), labeltype = "frex", n = 8)
+```
+
+## Model 1: Extract Top Thoughts for Topics 
+```{r}
+
+
+# Inspect the keywords (FREX words) for each topic in model_stm
+labelTopics(model_stm)
+
+# Loop through topics 1 to 15 to get examples
+for (i in 1:15) {
+  cat("Topic:", i, "\n")  # Display the topic number
+  # Find top 5 posts associated with the current topic
+  thoughts <- findThoughts(model_stm, texts = out$meta$title, n = 5, topics = i)$docs[[1]]
+  print(thoughts)  # Print the top posts
+  cat("\n")
+}
+
+```
+
+## Model 1: Estimate the Relationship Between Topics and Metadata
+
+```{r}
+out$meta$media_category <- as.factor(out$meta$media_category)
+model_eff <- estimateEffect(1:15 ~ media_category, model_stm, meta = out$meta, uncertainty = "Global")
+summary(model_eff, topics = 1:15)  # Look at the effect across all topics
+
+```
+
+## Model 1:Plot the relationship between topic and meta data. Here we care about how topics differ between media_category. 
+```{r}
+
+#levels(out$meta$media_category) # this function tells us what categories the variable has
+
+
+# Plot the difference between "far-left" and "far-right"
+plot(model_eff, covariate = "media_category",
+     model = model_stm, method = "difference", cov.value1 = "far-left",
+     cov.value2 = "far-right", 
+     xlab = "far-left vs. far-right",
+     main = "Effect of Media Category on News Topic (far-left vs far-right)",
+     xlim = c(-0.3, 0.3))
+
+# Plot the difference between "far-left" and "moderate"
+plot(model_eff, covariate = "media_category",
+     model = model_stm, method = "difference", cov.value1 = "far-left",
+     cov.value2 = "moderate", 
+     xlab = "far-left vs. moderate",
+     main = "Effect of Media Category on News Topic (far-left vs moderate)",
+     xlim = c(-0.3, 0.3))
+
+# Plot the difference between "far-right" and "moderate"
+plot(model_eff, covariate = "media_category",
+     model = model_stm, method = "difference", cov.value1 = "far-right",
+     cov.value2 = "moderate", 
+     xlab = "far-right vs. moderate",
+     main = "Effect of Media Category on News Topic (far-right vs moderate)",
+     xlim = c(-0.3, 0.3))
+
+```
+
+## Model 7&10: K=7 or 10, cov=media_category
+```{r}
+# Model for K=7
+model_stm_7 <- stm(documents = out$documents, 
+                   vocab = out$vocab,  
+                   K = 7,  
+                   prevalence =~ media_category, 
+                   seed = 100, 
+                   max.em.its = 100, 
+                   data = out$meta, 
+                   init.type = "Spectral"
+                   )
+
+# Model for K=10
+model_stm_10 <- stm(documents = out$documents, 
+                    vocab = out$vocab,  
+                    K = 10,  
+                    prevalence =~ media_category, 
+                    seed = 100, 
+                    max.em.its = 100, 
+                    data = out$meta, 
+                    init.type = "Spectral"
+                    )
+
+```
+
+## Model 7&10:Plot the topic summary
+```{r}
+plot(model_stm_7, type = "summary", xlim = c(0, 0.5), labeltype = "frex", n = 8)
+
+
+plot(model_stm_10, type = "summary", xlim = c(0, 0.5), labeltype = "frex", n = 8)
+```
+
+
+
+## Model 7&10:Extract Top Thoughts for Topics  
+```{r}
+# Function to extract thoughts for a given STM model
+extract_thoughts <- function(model, texts, num_topics, n_thoughts = 5) {
+  thoughts_list <- list()  # Create an empty list to store thoughts for each topic
+  
+  for (i in 1:num_topics) {
+    cat("Topic:", i, "\n")  # Display the topic number
+    
+    # Find top 'n_thoughts' posts associated with the current topic
+    thoughts <- findThoughts(model, texts = texts, n = n_thoughts, topics = i)$docs[[1]]
+    
+    # Print the top posts for this topic
+    print(thoughts)  
+    
+    # Store the thoughts for each topic in the list
+    thoughts_list[[paste0("Topic_", i)]] <- thoughts
+    
+    # Add a separator for better readability in console output
+    cat("\n-------------------\n")
+  }
+  
+  return(thoughts_list)  # Return the list of thoughts
+}
+
+# Extract thoughts for model_stm_7 (7 topics)
+cat("Extracting thoughts for model_stm_7\n")
+thoughts_list_7 <- extract_thoughts(model = model_stm_7, texts = out$meta$title, num_topics = 7)
+
+# Extract thoughts for model_stm_10 (10 topics)
+cat("Extracting thoughts for model_stm_10\n")
+thoughts_list_10 <- extract_thoughts(model = model_stm_10, texts = out$meta$title, num_topics = 10)
+
+# Optional: Inspect the keywords (FREX words) for each topic in model_stm_7 and model_stm_10
+cat("FREX keywords for model_stm_7:\n")
+labelTopics(model_stm_7)
+
+cat("FREX keywords for model_stm_10:\n")
+labelTopics(model_stm_10)
+
+```
+
+## Model 7&10:Estimate the Relationship Between Topics and Metadata
+```{r}
+
+model_eff_7 <- estimateEffect(1:7 ~ media_category, model_stm_7, meta = out$meta, uncertainty = "Global")
+model_eff_10 <- estimateEffect(1:10 ~ media_category, model_stm_10, meta = out$meta, uncertainty = "Global")
+
+# Summarize effects
+summary(model_eff_7, topics = 1:7)
+summary(model_eff_10, topics = 1:10)
+```
+
+## Model 7&10:Plot the relationship between topic and meta data. Here we care about how topics differ between media_category. it shows how much more or less a given topic is likely to appear in far-left media compared to far-right media.
+```{r}
+# Function to estimate effect and plot differences
+plot_topic_differences <- function(model, model_name, num_topics) {
+  
+  # Create the formula dynamically using 'paste'
+  formula_string <- paste0("1:", num_topics, " ~ media_category")
+  
+  # Estimate the effect of 'media_category' on topic prevalence
+  model_eff <- estimateEffect(as.formula(formula_string), model, meta = out$meta, uncertainty = "Global")
+  
+  # Print a summary of the model effects for all topics
+  cat("\nSummary of Topic Effects for", model_name, "\n")
+  summary(model_eff, topics = 1:num_topics)
+  
+  # Plot the differences between "far-left" and "far-right" for all topics
+  cat("\nPlotting topic differences for", model_name, "\n")
+  plot(model_eff, covariate = "media_category",
+       model = model, method = "difference", cov.value1 = "far-left",
+       cov.value2 = "far-right", 
+       xlab = "far-left vs. far-right",
+       main = paste("Effect of Media Category on News Topic (far-left vs far-right) -", model_name),
+       xlim = c(-0.3, 0.3))
+  
+  # Plot the differences between "far-left" and "moderate"
+  plot(model_eff, covariate = "media_category",
+       model = model, method = "difference", cov.value1 = "far-left",
+       cov.value2 = "moderate", 
+       xlab = "far-left vs. moderate",
+       main = paste("Effect of Media Category on News Topic (far-left vs moderate) -", model_name),
+       xlim = c(-0.3, 0.3))
+  
+  # Plot the differences between "far-right" and "moderate"
+  plot(model_eff, covariate = "media_category",
+       model = model, method = "difference", cov.value1 = "far-right",
+       cov.value2 = "moderate", 
+       xlab = "far-right vs. moderate",
+       main = paste("Effect of Media Category on News Topic (far-right vs moderate) -", model_name),
+       xlim = c(-0.3, 0.3))
+}
+
+# Apply the function to model_stm_7 (with 7 topics)
+plot_topic_differences(model_stm_7, "Model 7", 7)
+
+
+
+# Apply the function to model_stm_10 (with 10 topics)
+plot_topic_differences(model_stm_10, "Model 10", 10)
+
+```
+
+levels(out$meta$media_category)
+
+#Model 7: Clear Plot
+```{r}
+# Load necessary library
+library(ggplot2)
+
+# Organize the effect estimates into a dataframe for plotting
+coef_data <- data.frame(
+  Topic = rep(1:7, each = 3),  # 7 topics for model_stm_7
+  Media_Category = rep(c("far-left", "far-right", "moderate"), times = 7),  # For each topic
+  Estimate = c(
+    # Copy the coefficients from the summary for model_stm_7
+    0.275158, 0.006836, -0.025373,  # Topic 1
+    0.103892, 0.038864, 0.030942,   # Topic 2
+    0.153927, -0.062007, 0.054485,  # Topic 3
+    0.158586, -0.059852, -0.077210, # Topic 4
+    0.077061, 0.084162, 0.032010,   # Topic 5
+    0.074603, 0.058312, 0.037080,   # Topic 6
+    0.156938, -0.066449, -0.052206  # Topic 7
+  ),
+  Std_Error = c(
+    # Copy the standard errors from the summary for model_stm_7
+    0.011288, 0.013155, 0.013014,  # Topic 1
+    0.008941, 0.010420, 0.010246,  # Topic 2
+    0.008238, 0.009419, 0.009482,  # Topic 3
+    0.008887, 0.009830, 0.009538,  # Topic 4
+    0.007883, 0.009415, 0.009007,  # Topic 5
+    0.007308, 0.008708, 0.008494,  # Topic 6
+    0.007775, 0.009113, 0.008909   # Topic 7
+  )
+)
+
+# Create a bar plot for the coefficients of media categories
+ggplot(coef_data, aes(x = factor(Topic), y = Estimate, fill = Media_Category)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +  # Use a bar plot with dodge
+  geom_errorbar(aes(ymin = Estimate - Std_Error, ymax = Estimate + Std_Error), 
+                position = position_dodge(0.7), width = 0.2) +  # Add error bars
+  labs(x = "Topic", y = "Coefficient Estimate", 
+       title = "Effect of Media Category on Topic Prevalence (7 Topics)",
+       fill = "Media Category") + 
+  theme_minimal() +  # A clean theme
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Tilt x-axis labels for readability
+
+```
+#Model 10: Clear Plot
+
+```{r}
+# Load necessary library
+library(ggplot2)
+
+# Organize the effect estimates into a dataframe for plotting
+coef_data_10 <- data.frame(
+  Topic = rep(1:10, each = 3),  # 10 topics for model_stm_10
+  Media_Category = rep(c("far-left", "far-right", "moderate"), times = 10),  # For each topic
+  Estimate = c(
+    # Copy the coefficients from the summary for model_stm_10
+    0.212395, -0.007991, -0.127124,  # Topic 1
+    0.083972, 0.034963, 0.032510,    # Topic 2
+    0.083401, 0.008452, 0.147341,    # Topic 3
+    0.054692, 0.018258, -0.013963,   # Topic 4
+    0.051897, 0.085416, 0.030178,    # Topic 5
+    0.036332, 0.069598, 0.038963,    # Topic 6
+    0.121635, -0.050254, -0.002202,  # Topic 7
+    0.115656, -0.061633, -0.028876,  # Topic 8
+    0.135730, -0.061142, -0.055081,  # Topic 9
+    0.104070, -0.035503, -0.021596   # Topic 10
+  ),
+  Std_Error = c(
+    # Copy the standard errors from the summary for model_stm_10
+    0.009220, 0.011172, 0.010647,  # Topic 1
+    0.008756, 0.009880, 0.010043,  # Topic 2
+    0.008308, 0.009560, 0.009779,  # Topic 3
+    0.005204, 0.006307, 0.005766,  # Topic 4
+    0.007165, 0.008590, 0.008496,  # Topic 5
+    0.005722, 0.007246, 0.006776,  # Topic 6
+    0.006433, 0.007421, 0.007660,  # Topic 7
+    0.007156, 0.008115, 0.008329,  # Topic 8
+    0.007393, 0.008612, 0.008213,  # Topic 9
+    0.006966, 0.007643, 0.007816   # Topic 10
+  )
+)
+
+# Create a bar plot for the coefficients of media categories
+ggplot(coef_data_10, aes(x = factor(Topic), y = Estimate, fill = Media_Category)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +  # Use a bar plot with dodge
+  geom_errorbar(aes(ymin = Estimate - Std_Error, ymax = Estimate + Std_Error), 
+                position = position_dodge(0.7), width = 0.2) +  # Add error bars
+  labs(x = "Topic", y = "Coefficient Estimate", 
+       title = "Effect of Media Category on Topic Prevalence (10 Topics)",
+       fill = "Media Category") + 
+  theme_minimal() +  # A clean theme
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Tilt x-axis labels for readability
+
+```
+
+#Step 5: Selecting the Best Model Based on Multiple Runs
+#model selection
+```{r}
+model_select_7 <- selectModel(out$documents, out$vocab, K = 7, 
+                              prevalence =~ media_category, max.em.its = 100, 
+                              data = out$meta, runs = 20, 
+                              seed = 123, verbose = FALSE)
+
+plotModels(model_select_7, pch = c(1, 2, 3, 4))
+
+model_select_10 <- selectModel(out$documents, out$vocab, K = 10, 
+                               prevalence =~ media_category, max.em.its = 100, 
+                               data = out$meta, runs = 20, 
+                               seed = 123, verbose = FALSE)
+
+plotModels(model_select_10, pch = c(1, 2, 3, 4))
+
+model_select_15 <- selectModel(out$documents, out$vocab, K = 15, 
+                              prevalence =~ media_category, max.em.its = 100, 
+                              data = out$meta, runs = 20, 
+                              seed = 123, verbose = FALSE)
+
+plotModels(model_select_15, pch = c(1, 2, 3, 4))
+
+```
+
+
+# Model 2 covs: Using media_category and publishedYear
+
+#  Format Date for covariate as YEAR
+```{r}
+# lubridate package installed for handling date-time formats
+if(!require(lubridate)) install.packages("lubridate")
+library(lubridate)
+
+# Extract the year from 'publishedDate'
+out$meta$publishedYear <- year(ymd_hms(out$meta$publishedDate))
+
+# Check the output
+head(out$meta$publishedYear)
+
+# Convert 'media_category' to factor
+out$meta$media_category <- as.factor(out$meta$media_category)
+```
+
+```{r}
+
+# Use the 'publishedYear' and 'media_category' as covariates in STM
+model_stm_2 <- stm(documents = out$documents, 
+                 vocab = out$vocab,  
+                 K = 15,  
+                 prevalence =~ media_category + publishedYear,  # Use year as categorical covariate
+                 seed = 100, 
+                 max.em.its = 100, 
+                 data = out$meta, 
+                 init.type = "Spectral"
+                 )
+
+# Estimate the effect of media_category and publishedYear on topic prevalence
+model_eff_2 <- estimateEffect(1:15 ~ media_category + publishedYear, 
+                              model_stm_2, 
+                              meta = out$meta, 
+                              uncertainty = "Global")
+
+# Summarize the effects across all topics
+summary(model_eff_2, topics = 1:15)  # Look at the effect across all topics
+
+```
+
+```{r}
+# Plot the topic summary for model_stm_2
+plot(model_stm_2, type = "summary", xlim = c(0, 0.5), labeltype = "frex", n = 10)
+
+# Inspect the keywords (FREX words) for each topic in model_stm_2
+labelTopics(model_stm_2)
+
+# Example: Look at posts most associated with topics 1 & 2 from 'model_stm_2'
+thoughts1 <- findThoughts(model_stm_2, texts = out$meta$title, n = 6, topics = 1)$docs[[1]]
+thoughts1
+
+thoughts2 <- findThoughts(model_stm_2, texts = out$meta$title, n = 6, topics = 2)$docs[[1]]
+thoughts2
+
+thoughts3 <- findThoughts(model_stm_2, texts = out$meta$title, n = 6, topics = 3)$docs[[1]]
+thoughts3
+
+thoughts4 <- findThoughts(model_stm_2, texts = out$meta$title, n = 6, topics = 4)$docs[[1]]
+thoughts4
+```
+
+
+#visualzation more
+```{r}
+plot(model_stm, type = "summary", xlim = c(0, 0.3))
+```
+
+```{r}
+plot(model_stm_2, type = "perspectives", topics = c(3, 1)) # 11, 12, 8
+```
+
+plot two topics together
+```{r}
+plot(model_stm, type = "perspectives", topics = c(1, 3))
+```
+
+wordcloud 
+```{r}
+cloud(model_stm, topic = 1, scale = c(2, 0.5))
+```
+
+```{r}
+model_corr <- topicCorr(model_stm)
+plot(model_corr)
+```
+
+```{r}
+model_select <- selectModel(out$documents, out$vocab, K = 15, 
+                            prevalence =~ media_category, max.em.its = 100, 
+                            data = out$meta, runs = 20, 
+                            seed = 123, verbose = FALSE)
+plotModels(model_select, pch = c(1, 2, 3, 4))
+```
+
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##################################################
+Example 2
+```{r}
+setwd("C:/Users/linqi/Documents/gunvio/synthesio/data compile") #C:/Users/X1 Carbon/Desktop/sample codes/stm"
+```
+
+```{r}
+df <- read_csv("random_subsample.csv")
+print(names(df))
+df <- df[!is.na(df$`Mention Content`), ]
+```
+
+subset dataset into liberal and conservative 
+```{r}
+#df_left = df %>% filter((stance == 1 | stance == -1) & (ideology == -1)) #partisans that have a distinct stance
+```
+
+```{r}
+df_left = df %>% filter((stance == 1 | stance == 2) & (ideology == -1)) 
+```
+
+```{r}
+df_left = df_left[-c(485,686,722,1011,1068,1196,1347,1609,1856,1887,1973,1982,2000,2080,2165),] #I moved them here
+```
+
+*build corpus*
+```{r}
+mycorp <- corpus(df$"Mention Content") #corpus(df_left$tag_clean) # build corpus using tweet content, same as tm
+#docvars(mycorp, "stance") <- df_left$stance 
+```
+
+*tokenize*
+```{r}
+toks <- tokens(mycorp, remove_punct = TRUE, remove_numbers=TRUE) 
+toks <- tokens_select(toks, pattern = stopwords("en"), selection = "remove")
+```
+
+*remove stopwords*
+```{r}
+stopwords_and_single<-c(stopwords("english"),LETTERS,letters) #e.g., my, be
+toks <- tokens_select(toks, pattern = stopwords_and_single, selection = "remove") 
+```
+
+*create dfm; find common bigram*
+```{r}
+mydfm <- dfm(toks) #dfm document feature matrix. row is document, column is feature, count of bygram
+```
+
+```{r}
+bi_gram = tokens_ngrams(toks, n = 1) #bigram #every word is one unit, e.g, united states is bigram
+bi_dfm <- dfm(bi_gram)
+top_bigram <- names(topfeatures(bi_dfm, 200))
+```
+
+*trim dfm based on criterion* 
+```{r}
+mydfm1 = dfm_trim(mydfm, min_termfreq = 2, termfreq_type ="count") #filter data, like drop irrelevant info, if less than 2, trim
+mydfm2 = dfm_trim(mydfm1, max_docfreq = 0.4, docfreq_type = "prop") #too frequent, every document has, drop
+```
+
+*convert into stm object*
+note: in the process of trimming documents based on min term frequency count and max document proportion, some rows may become empty; since stm object does not take dfm with NA, we need to remove these rows before progressing to stm function
+```{r}
+mytdm = convert(mydfm2,to = "stm", docvars = docvars(mydfm2))
+#df_left_trim = df_left[-c(485,686,722,1011,1068,1196,1347,1609,1856,1887,1973,1982,2000,2080,2165),] # remove NA rows
+```
+
+```{r}
+#mytdm$meta$stance <- as.factor(mytdm$meta$stance) #if don't convert it into factor, it works
+```
+
+# Step 2: Preparation for Text Analysis(seems like the steps above can be also be done by) 
+```{r}
+
+# Assuming 'Content Mention' is the correct column name and df is your dataframe
+processed <- textProcessor(df$`Mention Content`, metadata = df)
+
+# Visualizing the impact of removing low-frequency words
+plotRemoved(processed$documents, lower.thresh = seq(1, 10, by = 1))
+
+#processed <- textProcessor(df$text, metadata = df) #include irrelevant info
+#out <- prepDocuments(processed$documents, processed$vocab, 
+#                     processed$meta)
+## Preparing documents for stm analysis
+out <- prepDocuments(processed$documents, processed$vocab, 
+                     processed$meta, lower.thresh = 5)
+```
+make change to the formula as needed: prevalence =~ stance here, I only included "stance" as covariate k = the number of topics assigned by researcher
+```{r}
+docs <- mytdm$documents
+vocab <- mytdm$vocab
+meta <-mytdm$meta
+```
+
+df$'Site Name' <- as.factor(df$'Site Name')
+# K number
+```{r}
+
+ktest_number <- searchK(out$documents, out$vocab, K = c(3:10),#2:10
+                        max.em.its = 25, 
+                        #prevalence = ~'Site Name',
+                        data = out$meta)
+## Plotting topic number search result
+#we want high sematic coherence and low residual
+plot(ktest_number)
+```
+# Step 3: Run the function stm to generate the most prevalent 10
+```{r}
+stm_left7 <- stm(documents = out$documents,  #documents from pro-processed data
+                 vocab = out$vocab, #vocabularies from pre-processed data
+                 K = 10, #n of topics
+                 #prevalence =~ 'Site Name',  # or content =~ rating
+                 max.em.its = 200, 
+                 data = out$meta,
+                 init.type = "Spectral",
+                 verbose = FALSE
+                )
+```
+
+```{r}
+summary(stm_left7)
+
+## Plotting topic prevalence
+plot(stm_left7, type = "summary") #labeltype = "frex", n = 6)
+
+```
+
+```{r}
+## Plotting topic prevalence
+plot(stm_left7, type = "summary", labeltype = "frex", n = 7)
+
+```
+
+
+## Making a short version for each article for later display purpose
+```{r}
+df$short <- substr(df$'Mention Content', 1, 1000) # keeping the first 500 characters
+df$short[1:5]
+```
+
+
+## Inspecting sample documents
+# n = the number of quote you'd like to plot, 
+# topics = the topic no. you'd like to plot
+```{r}
+example1 <- findThoughts(stm_left7, texts = df$'Mention Content', n = 5, topics = 10)$docs[[1]]
+example1
+example2 <- findThoughts(stm_left7, texts = df$short, n = 5, topics = 2)$docs[[1]]
+example2
+example3 <- findThoughts(stm_left7, texts = df$short, n = 5, topics = 3)$docs[[1]]
+example3
+example4 <- findThoughts(stm_left7, texts = df$short, n = 5, topics = 4)$docs[[1]]
+example4
+example5 <- findThoughts(stm_left7, texts = df$short, n = 5, topics = 5)$docs[[1]]
+example5
+example6 <- findThoughts(stm_left7, texts = df$short, n = 5, topics = 6)$docs[[1]]
+example6
+example7 <- findThoughts(stm_left7, texts = df$short, n = 5, topics = 7)$docs[[1]]
+example7
+example8 <- findThoughts(stm_left7, texts = df$short, n = 5, topics = 8)$docs[[1]]
+example8
+example9 <- findThoughts(stm_left7, texts = df$short, n = 5, topics = 9)$docs[[1]]
+example9
+example10 <- findThoughts(stm_left7, texts = df$short, n = 5, topics = 10)$docs[[1]]
+example10
+```
+
+save the stm model so you can later retrieve it
+```{r}
+#saveRDS(stm_left7,"stm_left7.rds") 
+```
+
+```{r}
+#mytdm$meta$stance <- as.factor(mytdm$meta$stance) #could move it here
+```
+
+```{r}
+prep_left7 <- estimateEffect(1:7 ~ stance, stm_left7, meta = mytdm$meta, uncertainty = "Global") #what is 1:7
+```
+
+```{r}
+#saveRDS(prep_left7,"prep_left7.rds") 
+```
+
+```{r}
+summary(prep_left7, topics = 6)
+```
+
+attach topic number of max theta score
+```{r}
+topic_index <- integer(nrow(stm_left7$theta)) 
+topic_theta <- integer(nrow(stm_left7$theta))
+for (i in 1:nrow(stm_left7$theta)) {
+  topic_index[i] <- which.max(stm_left7$theta[i, ]) #find max then assign back
+  topic_theta[i] <- max(stm_left7$theta[i, ]) #stm topic, which is highest, to which extent it is higher
+}
+```
+
+```{r}
+df_left$stm_topic7 <- topic_index
+df_left$max_theta7 <- topic_theta
+```
+
+view topic quality
+```{r}
+topicQuality(model = stm_left7, documents = docs) #how to check it
+#coherent, exclusivity. we pay more attention to exclusivity. ex > 9
+```
+
+view keywords per topic, n = the numer of keywords you request
+```{r}
+labelTopics(stm_left7, topics = 1, n = 10)
+```
+or
+```{r}
+labelTopics(stm_left7, c(1,3,5))
+```
+
+prep_left7 <- estimateEffect(1:7 ~ stance, stm_left7, meta = mytdm$meta, uncertainty = "Global")
+
+```{r}
+#prep_left7 <- readRDS("prep_left7.rds")
+```
+```{r}
+#stm_left7 <- readRDS("stm_left7.rds")
+```
+
+```{r}
+plot.estimateEffect(prep_left7, "stance", model = "stm_left7", method="difference", ## could you please tell me which models above should be in "XXX1" and "XXX2"? Thanks!
+                    cov.value1=-1,cov.value2=1,
+                     xlab="Positive vs Negative Vaccine Twitter Discourse",
+                    xlim = c(-.3, .3),
+                    main="Positive- vs Negative-Vaccine Topical Contrast \nAmong Liberal Users",
+                    labeltype = 'custom',
+                    custom.labels = c('1-Need for Vaccine',
+                                      '2-Vaccine Effectiveness',
+                                      '3-Role of Vaccine in the Pandemic',
+                                      '4-Vaccine as Coping Strategy',
+                                      '5-Conspiracy Regarding Big Pharma and Inequality',
+                                      '6-Vaccine Development',
+                                      '7-Vaccine-related Events and Health Policy'
+                    ))
+```
+prep_left7 <- estimateEffect(1:7 ~ stance, stm_left7, meta = mytdm$meta, uncertainty = "Global")
+
+additional plotting methods
+```{r}
+plot(stm_left7, type = "summary", xlim = c(0, 0.3))
+```
+
+```{r}
+plot(stm_left7, type = "perspectives", topics = 3)
+```
+
+```{r}
+left7predict <- readRDS("left7predict.rds") 
+```
+
+```{r}
+left7model <- readRDS("left7model.rds")
+```
+
+wordcloud
+```{r}
+cloud(stm_left7, topic = 1, scale = c(2, 0.5))
+```
+
+```{r}
+model_corr <- topicCorr(stm_left7)
+plot(model_corr)
+```
+
+```{r}
+model_select <- selectModel(mytdm$documents, mytdm$vocab, K = 15, 
+                            prevalence =~ stance, max.em.its = 100, 
+                            data = mytdm$meta, runs = 20, 
+                            seed = 123, verbose = FALSE)
+plotModels(model_select, pch = c(1, 2, 3, 4))
+```
+
+```{r}
+model_num_topics <- searchK(mytdm$documents, mytdm$vocab, 
+                            K = c(10, 15), verbose = FALSE, 
+                            prevalence =~ stance, data = mytdm$meta)
+plot(model_num_topics)
+```
